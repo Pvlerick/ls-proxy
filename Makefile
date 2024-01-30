@@ -5,4 +5,4 @@ build:
 	cargo build --release
 
 deploy:
-	cp ./target/release/lsp-proxy /usr/local/bin	
+	cp ./target/release/ls-proxy /usr/local/bin	
