@@ -1,11 +1,10 @@
 use std::{env, error::Error, io::stdin, path::Path, process::exit, thread};
 
+use ls_proxy::info;
 use signal_hook::{consts::SIGTERM, iterator::Signals};
-use tracing::{debug, event, info, span, Level};
+use tracing::{event, span, Level};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::{
-    fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry,
-};
+use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let file_appender = RollingFileAppender::builder()
@@ -19,22 +18,33 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
-    tracing_subscriber::fmt().with_writer(non_blocking).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .with_env_var("LSPROXY_LOG")
+                .from_env_lossy(),
+        )
+        .with_writer(non_blocking)
+        .init();
 
-    info!("proxy started");
+    let span = span!(Level::TRACE, "main");
+    let _ = span.enter();
+
+    event!(Level::DEBUG, "proxy started");
 
     let mut signals = Signals::new(&[SIGTERM])?;
 
     let _ = signals.handle();
     thread::spawn(move || {
         for sig in signals.forever() {
-            debug!("Received signal '{}', shutting down...", sig);
+            event!(Level::DEBUG, "Received signal '{}', shutting down...", sig);
             exit(0);
         }
     });
 
     let args: Vec<_> = env::args().collect();
-    debug!("{:?}\n", args);
+    event!(Level::DEBUG, "args: {:?}\n", args);
 
     loop {
         let mut buff = String::new();
@@ -50,10 +60,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn process_message(msg: String) -> Result<(), Box<dyn Error>> {
-    let span = span!(Level::INFO, "msg");
-    let _guard = span.enter();
+    let span = span!(Level::TRACE, "process_message");
+    let _ = span.enter();
 
-    event!(Level::INFO, "{}", msg);
+    info!(msg);
+    info!("format: {}", "erfg");
 
     Ok(())
 }
