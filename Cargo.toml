@@ -4,9 +4,6 @@ version = "0.1.0"
 authors = ["Philippe Vlérick pvlerick@gmail.com"]
 edition = "2021"
 
-[lib]
-path = "src/lib.rs"
-
 [[bin]]
 path = "src/main.rs"
 name = "ls-proxy"

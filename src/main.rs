@@ -1,8 +1,14 @@
-use std::{env, error::Error, io::stdin, path::Path, process::exit, thread};
+use std::{
+    env,
+    error::Error,
+    io::{stdin, Write},
+    path::Path,
+    process::{exit, Command, Stdio},
+    thread,
+};
 
-use ls_proxy::info;
 use signal_hook::{consts::SIGTERM, iterator::Signals};
-use tracing::{event, span, Level};
+use tracing::{debug, info, trace};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
@@ -28,43 +34,48 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_writer(non_blocking)
         .init();
 
-    let span = span!(Level::TRACE, "main");
-    let _ = span.enter();
+    set_signals_handler()?;
 
-    event!(Level::DEBUG, "proxy started");
-
-    let mut signals = Signals::new(&[SIGTERM])?;
-
-    let _ = signals.handle();
-    thread::spawn(move || {
-        for sig in signals.forever() {
-            event!(Level::DEBUG, "Received signal '{}', shutting down...", sig);
-            exit(0);
-        }
-    });
+    debug!("proxy started");
 
     let args: Vec<_> = env::args().collect();
-    event!(Level::DEBUG, "args: {:?}\n", args);
+    trace!("args {:?}\n", args);
 
-    loop {
-        let mut buff = String::new();
-        let stdin = stdin();
-        stdin.read_line(&mut buff).expect("read from stdin failed");
-        if buff.len() > 0 {
-            match process_message(buff) {
-                Err(e) => return Err(e),
-                _ => (),
+    let mut child = Command::new("gopls")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    if let (Some(mut child_stdin), Some(mut child_stdout)) =
+        (child.stdin.take(), child.stdout.take())
+    {
+        debug!("child stdin retreived");
+        loop {
+            let stdin = stdin();
+            let mut buff = String::new();
+            if stdin.read_line(&mut buff)? > 0 {
+                info!(buff);
+                child_stdin.write_all(buff.as_str().as_bytes())?;
             }
         }
     }
+
+    Ok(())
 }
 
-fn process_message(msg: String) -> Result<(), Box<dyn Error>> {
-    let span = span!(Level::TRACE, "process_message");
-    let _ = span.enter();
+fn set_signals_handler() -> Result<(), Box<dyn Error>> {
+    debug!("setting signals handler");
 
-    info!(msg);
-    info!("format: {}", "erfg");
+    let mut signals = Signals::new(&[SIGTERM])?;
+    let _ = signals.handle();
+
+    thread::spawn(move || {
+        for sig in signals.forever() {
+            debug!("Received signal '{}', shutting down...", sig);
+            exit(0);
+        }
+    });
 
     Ok(())
 }
