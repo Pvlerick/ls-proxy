@@ -1,14 +1,13 @@
 use std::{
     env,
     error::Error,
-    io::{stdin, Write},
     path::Path,
-    process::{exit, Command, Stdio},
+    process::{exit, Command},
     thread,
 };
 
 use signal_hook::{consts::SIGTERM, iterator::Signals};
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
@@ -41,25 +40,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = env::args().collect();
     trace!("args {:?}\n", args);
 
-    let mut child = Command::new("gopls")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let mut child = Command::new("gopls").spawn()?;
 
-    if let (Some(mut child_stdin), Some(mut child_stdout)) =
-        (child.stdin.take(), child.stdout.take())
-    {
-        debug!("child stdin retreived");
-        loop {
-            let stdin = stdin();
-            let mut buff = String::new();
-            if stdin.read_line(&mut buff)? > 0 {
-                info!(buff);
-                child_stdin.write_all(buff.as_str().as_bytes())?;
-            }
-        }
-    }
+    child.wait()?;
 
     Ok(())
 }
