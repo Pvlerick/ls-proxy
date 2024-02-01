@@ -1,6 +1,7 @@
 use std::{
     env,
     error::Error,
+    io::{self, Read, Write},
     path::Path,
     process::{exit, Command, Stdio},
     thread,
@@ -26,7 +27,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
+                .with_default_directive(LevelFilter::TRACE.into())
                 .with_env_var("LSPROXY_LOG")
                 .from_env_lossy(),
         )
@@ -40,21 +41,37 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = env::args().collect();
     trace!("args {:?}\n", args);
 
-    let mut tee = Command::new("tee")
-        .arg("/tmp/ls-proxy.log")
-        .stdout(Stdio::piped())
-        .spawn()?;
-    let tee_stdout = tee.stdout.take().expect("failed to get tee stdout");
-
-    let mut podman = Command::new("podman")
+    let mut child = Command::new("podman")
+        .stdin(Stdio::piped())
         .args(["run", "-i", "--rm", "-v", "/tmp:/tmp", "gopls"])
-        .stdin(tee_stdout)
         .spawn()?;
 
-    tee.wait()?;
-    podman.wait()?;
+    let mut buffer = [0u8; 1024];
+    let mut child_stdin = child.stdin.take().expect("failed to get child stdin");
+    loop {
+        let n = io::stdin().read(&mut buffer[..])?;
+        child_stdin.write(&buffer[..n])?;
+    }
+    //
 
-    Ok(())
+    //
+    // loop {
+    //     if io::stdin().read_line(&mut buff)? > 0 {
+    //         trace!(buff);
+    //         buff.clear();
+    //     }
+    // }
+
+    // let mut tee = Command::new("tee")
+    //     .arg("/tmp/ls-proxy.log")
+    //     .stdout(Stdio::piped())
+    //     .spawn()?;
+    // let tee_stdout = tee.stdout.take().expect("failed to get tee stdout");
+    //
+    // tee.wait()?;
+    // podman.wait()?;
+    //
+    // Ok(())
 }
 
 fn set_signals_handler() -> Result<(), Box<dyn Error>> {
