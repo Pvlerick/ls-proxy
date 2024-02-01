@@ -6,12 +6,17 @@ const CONTENT_LENGTH: [u8; 16] = [
 
 #[derive(Debug)]
 pub struct MessageParser {
-    leftover: [u8],
+    leftover: Option<Vec<u8>>,
 }
 
 impl MessageParser {
-    fn parse(&mut self, buffer: &[u8]) -> Option<Vec<Message>> {
-        // TODO Check if this could be done without memcopy?
+    fn new() -> Self {
+        MessageParser { leftover: None }
+    }
+
+    fn parse(&mut self, buffer: &[u8]) -> Vec<Message> {
+        let mut parsed = Vec::<Message>::new();
+        // TODO Check if this could be done without memcopy...
         let working_data = [&self.leftover, buffer].concat();
         for i in 0..working_data.len() {
             let candidate_end = i + CONTENT_LENGTH.len();
@@ -29,10 +34,10 @@ impl MessageParser {
                 let msg = Message {
                     payload: String::from_utf8_lossy(&working_data[idx..idx + len]).to_string(),
                 };
-                return (Some(msg), idx + len);
+                parsed.push(msg);
             }
         }
-        (None, 0)
+        return parsed;
     }
 }
 
@@ -42,31 +47,31 @@ mod tests {
 
     #[test]
     fn parse_empty() {
-        let (message, last_index) = MessageParser::parse("".as_bytes(), 0);
-        assert!(message.is_none());
-        assert_eq!(last_index, 0);
+        let mut sut = MessageParser::new();
+        let res = sut.parse("".as_bytes());
+        assert_eq!(res.len(), 0);
     }
 
     #[test]
     fn parse_junk() {
-        let (message, last_index) = MessageParser::parse(
+        let mut sut = MessageParser::new();
+        let res = sut.parse(
             r#"Content-foo 45
 
 and then some"#
                 .as_bytes(),
-            0,
         );
-        assert!(message.is_none());
-        assert_eq!(last_index, 0);
+        assert_eq!(res.len(), 0);
     }
 
     #[test]
     fn parse_simple_message() {
+        let mut sut = MessageParser::new();
         let msg = r#"Content-Length: 44
 
 {"jsonrpc":"2.0","method":"shutdown","id":3}"#;
-        let (message, last_index) = MessageParser::parse(msg.as_bytes(), 0);
-        assert!(message.is_some());
+        let res = sut.parse(msg);
+        assert_eq!(res.len(), 1);
         assert_eq!(
             message.unwrap().payload,
             r#"{"jsonrpc":"2.0","method":"shutdown","id":3}"#
