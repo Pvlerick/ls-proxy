@@ -7,7 +7,7 @@ use std::{
     thread,
 };
 
-use signal_hook::{consts::SIGTERM, iterator::Signals};
+use signal_hook::{consts::SIGINT, consts::SIGTERM, iterator::Signals};
 use tracing::{debug, trace};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{filter::LevelFilter, EnvFilter};
@@ -48,36 +48,30 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut buffer = [0u8; 1024];
     let mut child_stdin = child.stdin.take().expect("failed to get child stdin");
-    loop {
-        let n = io::stdin().read(&mut buffer[..])?;
-        child_stdin.write(&buffer[..n])?;
-    }
-    //
 
-    //
-    // loop {
-    //     if io::stdin().read_line(&mut buff)? > 0 {
-    //         trace!(buff);
-    //         buff.clear();
-    //     }
-    // }
+    thread::spawn(move || loop {
+        let n = io::stdin()
+            .read(&mut buffer[..])
+            .expect("failed to read from stdin");
+        if n > 0 {
+            trace!("read {} bytes from parent stdin", n);
+            let msg = String::from_utf8_lossy(&buffer[..n]);
+            trace!("{}", msg);
+            child_stdin
+                .write(&buffer[..n])
+                .expect("failed to write to child stdin");
+        }
+    });
 
-    // let mut tee = Command::new("tee")
-    //     .arg("/tmp/ls-proxy.log")
-    //     .stdout(Stdio::piped())
-    //     .spawn()?;
-    // let tee_stdout = tee.stdout.take().expect("failed to get tee stdout");
-    //
-    // tee.wait()?;
-    // podman.wait()?;
-    //
-    // Ok(())
+    child.wait()?;
+
+    Ok(())
 }
 
 fn set_signals_handler() -> Result<(), Box<dyn Error>> {
-    debug!("setting signals handler");
+    debug!("setting up signals handler");
 
-    let mut signals = Signals::new(&[SIGTERM])?;
+    let mut signals = Signals::new(&[SIGTERM, SIGINT])?;
     let _ = signals.handle();
 
     thread::spawn(move || {
