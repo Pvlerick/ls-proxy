@@ -45,10 +45,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         .stdout(Stdio::piped())
         .spawn()?;
     let tee_stdout = tee.stdout.take().expect("failed to get tee stdout");
-    let mut gopls = Command::new("gopls").stdin(tee_stdout).spawn()?;
+
+    let mut podman = Command::new("podman")
+        .args(["run", "-i", "--rm", "-v", "/tmp:/tmp", "gopls"])
+        .stdin(tee_stdout)
+        .spawn()?;
 
     tee.wait()?;
-    gopls.wait()?;
+    podman.wait()?;
 
     Ok(())
 }
