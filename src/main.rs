@@ -2,7 +2,7 @@ use std::{
     env,
     error::Error,
     path::Path,
-    process::{exit, Command},
+    process::{exit, Command, Stdio},
     thread,
 };
 
@@ -40,9 +40,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = env::args().collect();
     trace!("args {:?}\n", args);
 
-    let mut child = Command::new("gopls").spawn()?;
+    let mut tee = Command::new("tee")
+        .arg("/tmp/ls-proxy.log")
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let tee_stdout = tee.stdout.take().expect("failed to get tee stdout");
+    let mut gopls = Command::new("gopls").stdin(tee_stdout).spawn()?;
 
-    child.wait()?;
+    tee.wait()?;
+    gopls.wait()?;
 
     Ok(())
 }
