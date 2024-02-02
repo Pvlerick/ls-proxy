@@ -6,41 +6,63 @@ const CONTENT_LENGTH: [u8; 16] = [
 
 #[derive(Debug)]
 pub struct MessageParser {
-    leftover: Option<Vec<u8>>,
+    leftover: Vec<u8>,
 }
 
 impl MessageParser {
     fn new() -> Self {
-        MessageParser { leftover: None }
+        MessageParser {
+            leftover: Vec::<u8>::new(),
+        }
     }
 
     fn parse(&mut self, buffer: &[u8]) -> Vec<Message> {
         let mut parsed = Vec::<Message>::new();
         // TODO Check if this could be done without memcopy...
-        let working_data = [&self.leftover.take().unwrap_or_default(), buffer].concat();
+        let working_data = [&self.leftover, buffer].concat();
+        let mut last_msg_end = 0;
         let mut index = 0;
         while index < working_data.len() {
             let candidate_end = index + CONTENT_LENGTH.len();
-            if candidate_end < working_data.len()
-                && working_data[index..candidate_end] == CONTENT_LENGTH
-            {
-                let mut idx = index + CONTENT_LENGTH.len();
+
+            if candidate_end >= working_data.len() {
+                self.leftover = working_data[last_msg_end..].to_vec();
+                return parsed;
+            }
+
+            if working_data[index..candidate_end] == CONTENT_LENGTH {
+                let mut idx = candidate_end;
                 let mut content_length: usize = 0;
                 while working_data[idx].is_ascii_digit() {
                     content_length =
                         (content_length * 10) + Into::<usize>::into(working_data[idx] - 48);
                     idx += 1;
+                    if idx >= working_data.len() {
+                        self.leftover = working_data[last_msg_end..].to_vec();
+                        return parsed;
+                    }
                 }
                 idx += 2; //two \n after the Content-Length
+                if idx >= working_data.len() {
+                    self.leftover = working_data[last_msg_end..].to_vec();
+                    return parsed;
+                }
+                let message_end = idx + content_length;
+                if message_end > working_data.len() {
+                    self.leftover = working_data[last_msg_end..].to_vec();
+                    return parsed;
+                }
+
                 let msg = Message {
-                    payload: String::from_utf8_lossy(&working_data[idx..idx + content_length])
-                        .to_string(),
+                    payload: String::from_utf8_lossy(&working_data[idx..message_end]).to_string(),
                 };
                 parsed.push(msg);
+                index = idx + content_length;
+                last_msg_end = index;
+                dbg!(last_msg_end);
             } else {
-                self.leftover = Some(working_data[index..].to_vec());
+                index += 1;
             }
-            index += 1;
         }
         return parsed;
     }
@@ -117,8 +139,8 @@ more junk"#;
             res[0].payload,
             r#"{"jsonrpc":"2.0","method":"shutdown","id":3}"#
         );
-        assert!(sut.leftover.is_some());
-        assert_eq!(sut.leftover.unwrap().len(), 17);
+        dbg!(&sut.leftover);
+        assert_eq!(sut.leftover.len(), 18);
     }
 
     #[test]
@@ -141,6 +163,38 @@ Content-Length: 44
             res[1].payload,
             r#"{"jsonrpc":"2.0","method":"shutdown","id":4}"#
         );
-        assert_eq!(sut.leftover.unwrap().len(), 29);
+        assert_eq!(sut.leftover.len(), 29);
+    }
+
+    #[test]
+    fn parse_one_message_in_two_chunks() {
+        let mut sut = MessageParser::new();
+        let chunk_1 = r#"foo barContent-Length: 44
+
+{"jsonrpc":"2.0","met"#;
+        let chunk_2 = r#"hod":"shutdown","id":3}and some
+more junk"#;
+        let res = sut.parse(chunk_1.as_bytes());
+        assert_eq!(res.len(), 0);
+        assert_eq!(sut.leftover.len(), 48);
+        let res = sut.parse(chunk_2.as_bytes());
+        assert_eq!(res.len(), 1);
+        assert_eq!(sut.leftover.len(), 18);
+    }
+
+    #[test]
+    fn parse_one_message_in_two_chunks_cut_in_middle_of_content_length() {
+        let mut sut = MessageParser::new();
+        let chunk_1 = r#"foo barContent-Length: 4"#;
+        let chunk_2 = r#"4
+
+{"jsonrpc":"2.0","method":"shutdown","id":3}and some
+more obvious junk"#;
+        let res = sut.parse(chunk_1.as_bytes());
+        assert_eq!(res.len(), 0);
+        assert_eq!(sut.leftover.len(), 24);
+        let res = sut.parse(chunk_2.as_bytes());
+        assert_eq!(res.len(), 1);
+        assert_eq!(sut.leftover.len(), 26);
     }
 }
