@@ -10,13 +10,13 @@ pub struct MessageParser {
 }
 
 impl MessageParser {
-    fn new() -> Self {
+    pub fn new() -> Self {
         MessageParser {
             leftover: Vec::<u8>::new(),
         }
     }
 
-    fn parse(&mut self, buffer: &[u8]) -> Vec<Message> {
+    pub fn parse(&mut self, buffer: &[u8]) -> Vec<Message> {
         let mut parsed = Vec::<Message>::new();
         // TODO Check if this could be done without memcopy...
         let working_data = [&self.leftover, buffer].concat();
@@ -42,7 +42,7 @@ impl MessageParser {
                         return parsed;
                     }
                 }
-                idx += 2; //two \n after the Content-Length
+                idx += 4; //two \n after the Content-Length
                 if idx >= working_data.len() {
                     self.leftover = working_data[last_msg_end..].to_vec();
                     return parsed;
@@ -59,7 +59,6 @@ impl MessageParser {
                 parsed.push(msg);
                 index = idx + content_length;
                 last_msg_end = index;
-                dbg!(last_msg_end);
             } else {
                 index += 1;
             }
@@ -94,9 +93,8 @@ and then some"#
     #[test]
     fn parse_one_message() {
         let mut sut = MessageParser::new();
-        let msg = r#"Content-Length: 44
-
-{"jsonrpc":"2.0","method":"shutdown","id":3}"#;
+        let msg =
+            "Content-Length: 44\r\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"id\":3}";
         let res = sut.parse(msg.as_bytes());
         assert_eq!(res.len(), 1);
         assert_eq!(
@@ -108,12 +106,7 @@ and then some"#
     #[test]
     fn parse_two_messages() {
         let mut sut = MessageParser::new();
-        let msg = r#"Content-Length: 44
-
-{"jsonrpc":"2.0","method":"shutdown","id":3}
-"Content-Length: 44
-
-{"jsonrpc":"2.0","method":"shutdown","id":4}"#;
+        let msg = "Content-Length: 44\r\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"id\":3}Content-Length: 44\r\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"id\":4}";
         let res = sut.parse(msg.as_bytes());
         assert_eq!(res.len(), 2);
         assert_eq!(
@@ -129,30 +122,20 @@ and then some"#
     #[test]
     fn parse_one_message_surrounded_by_junk() {
         let mut sut = MessageParser::new();
-        let msg = r#"foo barContent-Length: 44
-
-{"jsonrpc":"2.0","method":"shutdown","id":3}and some
-more junk"#;
+        let msg = "foo barContent-Length: 44\r\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"id\":3}and some\r\nmore junk";
         let res = sut.parse(msg.as_bytes());
         assert_eq!(res.len(), 1);
         assert_eq!(
             res[0].payload,
             r#"{"jsonrpc":"2.0","method":"shutdown","id":3}"#
         );
-        dbg!(&sut.leftover);
-        assert_eq!(sut.leftover.len(), 18);
+        assert_eq!(sut.leftover.len(), 19);
     }
 
     #[test]
     fn parse_two_messages_surrounded_by_junk() {
         let mut sut = MessageParser::new();
-        let msg = r#"some junk
-Content-Length: 44
-
-{"jsonrpc":"2.0","method":"shutdown","id":3}and more some inbetween
-Content-Length: 44
-
-{"jsonrpc":"2.0","method":"shutdown","id":4}and even some more at the end"#;
+        let msg = "some junk\r\nContent-Length: 44\r\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"id\":3}and more some inbetween\r\n\r\nContent-Length: 44\r\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"id\":4}and even some more at the end";
         let res = sut.parse(msg.as_bytes());
         assert_eq!(res.len(), 2);
         assert_eq!(
@@ -169,32 +152,34 @@ Content-Length: 44
     #[test]
     fn parse_one_message_in_two_chunks() {
         let mut sut = MessageParser::new();
-        let chunk_1 = r#"foo barContent-Length: 44
-
-{"jsonrpc":"2.0","met"#;
-        let chunk_2 = r#"hod":"shutdown","id":3}and some
-more junk"#;
+        let chunk_1 = "foo barContent-Length: 44\r\n\r\n{\"jsonrpc\":\"2.0\",\"met";
+        let chunk_2 = "hod\":\"shutdown\",\"id\":3}and some\r\nmore junk";
         let res = sut.parse(chunk_1.as_bytes());
         assert_eq!(res.len(), 0);
-        assert_eq!(sut.leftover.len(), 48);
+        assert_eq!(sut.leftover.len(), 50);
         let res = sut.parse(chunk_2.as_bytes());
         assert_eq!(res.len(), 1);
-        assert_eq!(sut.leftover.len(), 18);
+        assert_eq!(
+            res[0].payload,
+            r#"{"jsonrpc":"2.0","method":"shutdown","id":3}"#
+        );
+        assert_eq!(sut.leftover.len(), 19);
     }
 
     #[test]
     fn parse_one_message_in_two_chunks_cut_in_middle_of_content_length() {
         let mut sut = MessageParser::new();
-        let chunk_1 = r#"foo barContent-Length: 4"#;
-        let chunk_2 = r#"4
-
-{"jsonrpc":"2.0","method":"shutdown","id":3}and some
-more obvious junk"#;
+        let chunk_1 = "foo barContent-Length: 4";
+        let chunk_2 = "4\r\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"id\":3}and some\r\nmore obvious junk";
         let res = sut.parse(chunk_1.as_bytes());
         assert_eq!(res.len(), 0);
         assert_eq!(sut.leftover.len(), 24);
         let res = sut.parse(chunk_2.as_bytes());
         assert_eq!(res.len(), 1);
-        assert_eq!(sut.leftover.len(), 26);
+        assert_eq!(
+            res[0].payload,
+            r#"{"jsonrpc":"2.0","method":"shutdown","id":3}"#
+        );
+        assert_eq!(sut.leftover.len(), 27);
     }
 }
