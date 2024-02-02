@@ -17,25 +17,30 @@ impl MessageParser {
     fn parse(&mut self, buffer: &[u8]) -> Vec<Message> {
         let mut parsed = Vec::<Message>::new();
         // TODO Check if this could be done without memcopy...
-        let working_data = [&self.leftover, buffer].concat();
-        for i in 0..working_data.len() {
-            let candidate_end = i + CONTENT_LENGTH.len();
+        let working_data = [&self.leftover.take().unwrap_or_default(), buffer].concat();
+        let mut index = 0;
+        while index < working_data.len() {
+            let candidate_end = index + CONTENT_LENGTH.len();
             if candidate_end < working_data.len()
-                && working_data[i..candidate_end] == CONTENT_LENGTH
+                && working_data[index..candidate_end] == CONTENT_LENGTH
             {
-                let mut idx = i + CONTENT_LENGTH.len();
-                let mut s = String::new();
+                let mut idx = index + CONTENT_LENGTH.len();
+                let mut content_length: usize = 0;
                 while working_data[idx].is_ascii_digit() {
-                    s.push(working_data[idx] as char);
+                    content_length =
+                        (content_length * 10) + Into::<usize>::into(working_data[idx] - 48);
                     idx += 1;
                 }
-                let len: usize = s.parse().expect("cannot parse content length");
                 idx += 2; //two \n after the Content-Length
                 let msg = Message {
-                    payload: String::from_utf8_lossy(&working_data[idx..idx + len]).to_string(),
+                    payload: String::from_utf8_lossy(&working_data[idx..idx + content_length])
+                        .to_string(),
                 };
                 parsed.push(msg);
+            } else {
+                self.leftover = Some(working_data[index..].to_vec());
             }
+            index += 1;
         }
         return parsed;
     }
@@ -65,12 +70,12 @@ and then some"#
     }
 
     #[test]
-    fn parse_simple_message() {
+    fn parse_one_message() {
         let mut sut = MessageParser::new();
         let msg = r#"Content-Length: 44
 
 {"jsonrpc":"2.0","method":"shutdown","id":3}"#;
-        let res = sut.parse(msg);
+        let res = sut.parse(msg.as_bytes());
         assert_eq!(res.len(), 1);
         assert_eq!(
             res[0].payload,
@@ -79,13 +84,34 @@ and then some"#
     }
 
     #[test]
-    fn parse_simple_message_surrounded_by_junk() {
+    fn parse_two_messages() {
+        let mut sut = MessageParser::new();
+        let msg = r#"Content-Length: 44
+
+{"jsonrpc":"2.0","method":"shutdown","id":3}
+"Content-Length: 44
+
+{"jsonrpc":"2.0","method":"shutdown","id":4}"#;
+        let res = sut.parse(msg.as_bytes());
+        assert_eq!(res.len(), 2);
+        assert_eq!(
+            res[0].payload,
+            r#"{"jsonrpc":"2.0","method":"shutdown","id":3}"#
+        );
+        assert_eq!(
+            res[1].payload,
+            r#"{"jsonrpc":"2.0","method":"shutdown","id":4}"#
+        );
+    }
+
+    #[test]
+    fn parse_one_message_surrounded_by_junk() {
         let mut sut = MessageParser::new();
         let msg = r#"foo barContent-Length: 44
 
 {"jsonrpc":"2.0","method":"shutdown","id":3}and some
 more junk"#;
-        let res = sut.parse(msg);
+        let res = sut.parse(msg.as_bytes());
         assert_eq!(res.len(), 1);
         assert_eq!(
             res[0].payload,
@@ -93,5 +119,28 @@ more junk"#;
         );
         assert!(sut.leftover.is_some());
         assert_eq!(sut.leftover.unwrap().len(), 17);
+    }
+
+    #[test]
+    fn parse_two_messages_surrounded_by_junk() {
+        let mut sut = MessageParser::new();
+        let msg = r#"some junk
+Content-Length: 44
+
+{"jsonrpc":"2.0","method":"shutdown","id":3}and more some inbetween
+Content-Length: 44
+
+{"jsonrpc":"2.0","method":"shutdown","id":4}and even some more at the end"#;
+        let res = sut.parse(msg.as_bytes());
+        assert_eq!(res.len(), 2);
+        assert_eq!(
+            res[0].payload,
+            r#"{"jsonrpc":"2.0","method":"shutdown","id":3}"#
+        );
+        assert_eq!(
+            res[1].payload,
+            r#"{"jsonrpc":"2.0","method":"shutdown","id":4}"#
+        );
+        assert_eq!(sut.leftover.unwrap().len(), 29);
     }
 }
