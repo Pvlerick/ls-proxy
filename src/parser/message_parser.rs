@@ -73,24 +73,25 @@ and then some"#
         let res = sut.parse(msg);
         assert_eq!(res.len(), 1);
         assert_eq!(
-            message.unwrap().payload,
+            res[0].payload,
             r#"{"jsonrpc":"2.0","method":"shutdown","id":3}"#
         );
-        assert_eq!(last_index, 64);
     }
 
     #[test]
     fn parse_simple_message_surrounded_by_junk() {
+        let mut sut = MessageParser::new();
         let msg = r#"foo barContent-Length: 44
 
 {"jsonrpc":"2.0","method":"shutdown","id":3}and some
 more junk"#;
-        let (message, last_index) = MessageParser::parse(msg.as_bytes(), 0);
-        assert!(message.is_some());
+        let res = sut.parse(msg);
+        assert_eq!(res.len(), 1);
         assert_eq!(
-            message.unwrap().payload,
+            res[0].payload,
             r#"{"jsonrpc":"2.0","method":"shutdown","id":3}"#
         );
-        assert_eq!(last_index, 71);
+        assert!(sut.leftover.is_some());
+        assert_eq!(sut.leftover.unwrap().len(), 17);
     }
 }
