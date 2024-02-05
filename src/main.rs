@@ -11,11 +11,14 @@ use ls_proxy::parser::MessageParser;
 
 use signal_hook::{consts::SIGINT, consts::SIGTERM, iterator::Signals};
 use tracing::{debug, trace};
-use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_appender::{
+    non_blocking::WorkerGuard,
+    rolling::{RollingFileAppender, Rotation},
+};
 use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    set_tracing();
+    let _guard = set_tracing();
     set_signals_handler()?;
 
     debug!("proxy started");
@@ -40,6 +43,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             if n > 0 {
                 // Parse, and later transform?
                 trace!("read {} bytes from stdin", n);
+                // trace!("raw: {}", String::from_utf8_lossy(&buffer[..n]));
                 for msg in message_parser.parse(&buffer[..n]) {
                     trace!("{}", msg.payload);
                 }
@@ -56,7 +60,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn set_tracing() {
+fn set_tracing() -> WorkerGuard {
     let file_appender = RollingFileAppender::builder()
         .rotation(Rotation::NEVER)
         .filename_prefix("log")
@@ -66,7 +70,7 @@ fn set_tracing() {
         )
         .expect("failed to initialize file appender");
 
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -77,6 +81,8 @@ fn set_tracing() {
         )
         .with_writer(non_blocking)
         .init();
+
+    guard
 }
 
 fn set_signals_handler() -> Result<(), Box<dyn Error>> {
