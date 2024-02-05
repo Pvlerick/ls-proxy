@@ -41,9 +41,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .read(&mut buffer)
                 .expect("failed to read from stdin");
             if n > 0 {
-                // Parse, and later transform?
                 trace!("read {} bytes from stdin", n);
-                // trace!("raw: {}", String::from_utf8_lossy(&buffer[..n]));
+                trace!("[RAW] {}", String::from_utf8_lossy(&buffer[..n]));
                 for msg in message_parser.parse(&buffer[..n]) {
                     trace!("{}", msg.payload);
                 }

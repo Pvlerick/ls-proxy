@@ -42,7 +42,8 @@ impl MessageParser {
                         return parsed;
                     }
                 }
-                idx += 4; //two \n after the Content-Length
+                // TODO There can also be a Content-Type header present
+                idx += 4; // \r\n after the Content-Length
                 if idx >= working_data.len() {
                     self.leftover = working_data[last_msg_end..].to_vec();
                     return parsed;
@@ -57,6 +58,7 @@ impl MessageParser {
                     payload: String::from_utf8_lossy(&working_data[idx..message_end]).to_string(),
                 };
                 parsed.push(msg);
+                self.leftover.clear();
                 index = idx + content_length;
                 last_msg_end = index;
             } else {
@@ -181,5 +183,22 @@ and then some"#
             r#"{"jsonrpc":"2.0","method":"shutdown","id":3}"#
         );
         assert_eq!(sut.leftover.len(), 27);
+    }
+
+    #[test]
+    fn parse_two_messages_int_three_chunks() {
+        let mut sut = MessageParser::new();
+        let chunk_1 = "Content-Length: 4";
+        let chunk_2 = "4\r\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"id\":3}Content-Length: 44\r\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"shutd";
+        let chunk_3 = "own\",\"id\":3}";
+        let res = sut.parse(chunk_1.as_bytes());
+        assert_eq!(res.len(), 0);
+        assert_eq!(sut.leftover.len(), 17);
+        let res = sut.parse(chunk_2.as_bytes());
+        assert_eq!(res.len(), 1);
+        assert_eq!(sut.leftover.len(), 54);
+        let res = sut.parse(chunk_3.as_bytes());
+        assert_eq!(res.len(), 1);
+        assert_eq!(sut.leftover.len(), 0);
     }
 }
