@@ -28,7 +28,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut child = Command::new("podman")
         .stdin(Stdio::piped())
-        .args(["run", "-i", "--rm", "-v", "/tmp:/tmp", "gopls"])
+        .args([
+            "run",
+            "-i",
+            "--rm",
+            "-v",
+            format!("{}:{}", &args[2], &args[2]).as_str(),
+            &args[1],
+        ])
         .spawn()?;
 
     let mut buffer = [0u8; 1024];
