@@ -1,6 +1,7 @@
 use std::{
     env,
     error::Error,
+    fmt::Debug,
     io::{self, Read, Write},
     path::Path,
     process::{exit, Command, Stdio},
@@ -10,7 +11,7 @@ use std::{
 use ls_proxy::parser::MessageParser;
 
 use signal_hook::{consts::SIGINT, consts::SIGTERM, iterator::Signals};
-use tracing::{debug, trace};
+use tracing::{debug, span, trace, Level};
 use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{RollingFileAppender, Rotation},
@@ -21,13 +22,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let _guard = set_tracing();
     set_signals_handler()?;
 
-    debug!("proxy started");
+    debug!("ls-proxy started");
 
     let args: Vec<_> = env::args().collect();
     trace!("args {:?}\n", args);
 
     let mut child = Command::new("podman")
         .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .args([
             "run",
             "-i",
@@ -38,32 +41,83 @@ fn main() -> Result<(), Box<dyn Error>> {
         ])
         .spawn()?;
 
-    let mut buffer = [0u8; 1024];
-    let mut child_stdin = child.stdin.take().expect("failed to get child stdin");
+    start_copy_thread(
+        io::stdin(),
+        child.stdin.take().expect("failed to get child stdin"),
+        message_parser_inspector(),
+    );
 
-    thread::spawn(move || {
-        let mut message_parser = MessageParser::new();
-        loop {
-            let n = io::stdin()
-                .read(&mut buffer)
-                .expect("failed to read from stdin");
-            if n > 0 {
-                trace!("read {} bytes from stdin", n);
-                trace!("[RAW] {}", String::from_utf8_lossy(&buffer[..n]));
-                for msg in message_parser.parse(&buffer[..n]) {
-                    trace!("{}", msg.payload);
-                }
-                // Send to child process
-                child_stdin
-                    .write(&buffer[..n])
-                    .expect("failed to write to child stdin");
-            }
-        }
-    });
+    start_copy_thread(
+        child.stdout.take().expect("failed to get child stdout"),
+        io::stdout(),
+        message_parser_inspector(),
+    );
+
+    start_copy_thread(
+        child.stderr.take().expect("failed to get child stderr"),
+        io::stderr(),
+        empty_inspector(),
+    );
 
     child.wait()?;
 
     Ok(())
+}
+
+fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(mut input: R, mut output: W, mut inspect_buffer: F)
+where
+    R: Read + Send + Debug + 'static,
+    W: Write + Send + Debug + 'static,
+    F: Send + 'static,
+{
+    const BUFFER_SIZE: usize = 4098;
+
+    thread::spawn(move || {
+        trace!(
+            "starting copy thread from {:?} to {:?} with buffer size {}",
+            input,
+            output,
+            BUFFER_SIZE
+        );
+
+        let mut buffer = [0u8; BUFFER_SIZE];
+
+        loop {
+            let bytes_read = input.read(&mut buffer).expect("failed to read");
+            if bytes_read > 0 {
+                trace!("read {} bytes from {:?}", bytes_read, input);
+                trace!(
+                    "[BUFFER] {}",
+                    String::from_utf8_lossy(&buffer[..bytes_read])
+                );
+
+                inspect_buffer(&buffer);
+
+                let mut total_bytes_written = 0;
+                while total_bytes_written < bytes_read {
+                    let bytes_written = output
+                        .write(&buffer[total_bytes_written..bytes_read])
+                        .expect("failed to write");
+                    total_bytes_written += bytes_written;
+                    trace!("wrote {} bytes to {:?}", bytes_written, output);
+                }
+            }
+        }
+    });
+}
+
+fn message_parser_inspector() -> impl FnMut(&[u8]) {
+    let mut mp = MessageParser::new();
+
+    move |buffer: &[u8]| {
+        for msg in mp.parse(buffer) {
+            trace!("[MSG] {}", msg.payload);
+        }
+    }
+}
+
+fn empty_inspector() -> impl FnMut(&[u8]) {
+    |_: &[u8]| {}
 }
 
 fn set_tracing() -> WorkerGuard {
