@@ -2,7 +2,7 @@ use std::{
     env,
     error::Error,
     fmt::Debug,
-    io::{self, ErrorKind, Read, Write},
+    io::{self, Read, Write},
     path::Path,
     process::{Command, Stdio},
     thread,
@@ -10,7 +10,7 @@ use std::{
 
 use ls_proxy::parser::MessageParser;
 
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
 use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{RollingFileAppender, Rotation},
@@ -25,20 +25,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = env::args().collect();
     trace!("args {:?}\n", args);
 
-    let mut tee_in = Command::new("tee")
-        .stdout(Stdio::piped())
-        .arg("/tmp/ls-proxy-in")
-        .spawn()?;
-
-    let mut tee_out = Command::new("tee")
-        .stdin(Stdio::piped())
-        .arg("/tmp/ls-proxy-out")
-        .spawn()?;
-
     let mut child = Command::new("podman")
-        .stdin(tee_in.stdout.take().expect("failed to get tee_in stdout"))
-        .stdout(tee_out.stdin.take().expect("failed to get tee_out stdin"))
-        // .stderr(Stdio::piped())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .args([
             "run",
             "-i",
@@ -49,31 +39,33 @@ fn main() -> Result<(), Box<dyn Error>> {
         ])
         .spawn()?;
 
-    // start_copy_thread(
-    //     io::stdin(),
-    //     child.stdin.take().expect("failed to get child stdin"),
-    //     message_parser_inspector(),
-    // );
-    //
-    // start_copy_thread(
-    //     child.stdout.take().expect("failed to get child stdout"),
-    //     io::stdout(),
-    //     message_parser_inspector(),
-    // );
-    //
-    // start_copy_thread(
-    //     child.stderr.take().expect("failed to get child stderr"),
-    //     io::stderr(),
-    //     empty_inspector(),
-    // );
+    start_copy_thread(
+        io::stdin(),
+        child.stdin.take().expect("failed to get child stdin"),
+        message_parser_inspector(),
+    );
 
-    let child_exit_status = child
+    start_copy_thread(
+        child.stdout.take().expect("failed to get child stdout"),
+        io::stdout(),
+        message_parser_inspector(),
+    );
+
+    start_copy_thread(
+        child.stderr.take().expect("failed to get child stderr"),
+        io::stderr(),
+        empty_inspector(),
+    );
+
+    let child_output = child
         .wait_with_output()
         .expect("failed waiting on child process termination");
 
+    info!("[OUTPUT] {}", String::from_utf8_lossy(&child_output.stdout));
+
     debug!(
         "child process exit status: {}",
-        child_exit_status.status.code().unwrap()
+        child_output.status.code().unwrap()
     );
 
     Ok(())
@@ -85,7 +77,7 @@ where
     W: Write + Send + Debug + 'static,
     F: Send + 'static,
 {
-    const BUFFER_SIZE: usize = 8196;
+    const BUFFER_SIZE: usize = 8 * 1024;
 
     thread::spawn(move || {
         trace!(
@@ -99,18 +91,15 @@ where
 
         loop {
             let bytes_read = input.read(&mut buffer).expect("failed to read");
+            let buf = &buffer[..bytes_read];
             if bytes_read > 0 {
                 trace!("read {} bytes from {:?}", bytes_read, input);
-                trace!(
-                    "[BUFFER] {}",
-                    String::from_utf8_lossy(&buffer[..bytes_read])
-                );
+                trace!("[BUFFER] {}", String::from_utf8_lossy(&buf),);
 
-                inspect_buffer(&buffer[..bytes_read]);
+                inspect_buffer(&buf);
 
-                output
-                    .write_all(&buffer[..bytes_read])
-                    .expect("failed to write");
+                output.write_all(&buf).expect("failed to write");
+                output.flush().expect("failed to flush output");
             }
         }
     });
