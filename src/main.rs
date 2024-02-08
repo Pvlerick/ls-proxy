@@ -25,10 +25,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = env::args().collect();
     trace!("args {:?}\n", args);
 
-    let mut child = Command::new("podman")
-        .stdin(Stdio::piped())
+    let mut tee_in = Command::new("tee")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .arg("/tmp/ls-proxy-in")
+        .spawn()?;
+
+    let mut tee_out = Command::new("tee")
+        .stdin(Stdio::piped())
+        .arg("/tmp/ls-proxy-out")
+        .spawn()?;
+
+    let mut child = Command::new("podman")
+        .stdin(tee_in.stdout.take().expect("failed to get tee_in stdout"))
+        .stdout(tee_out.stdin.take().expect("failed to get tee_out stdin"))
+        // .stderr(Stdio::piped())
         .args([
             "run",
             "-i",
@@ -39,23 +49,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         ])
         .spawn()?;
 
-    start_copy_thread(
-        io::stdin(),
-        child.stdin.take().expect("failed to get child stdin"),
-        message_parser_inspector(),
-    );
-
-    start_copy_thread(
-        child.stdout.take().expect("failed to get child stdout"),
-        io::stdout(),
-        message_parser_inspector(),
-    );
-
-    start_copy_thread(
-        child.stderr.take().expect("failed to get child stderr"),
-        io::stderr(),
-        empty_inspector(),
-    );
+    // start_copy_thread(
+    //     io::stdin(),
+    //     child.stdin.take().expect("failed to get child stdin"),
+    //     message_parser_inspector(),
+    // );
+    //
+    // start_copy_thread(
+    //     child.stdout.take().expect("failed to get child stdout"),
+    //     io::stdout(),
+    //     message_parser_inspector(),
+    // );
+    //
+    // start_copy_thread(
+    //     child.stderr.take().expect("failed to get child stderr"),
+    //     io::stderr(),
+    //     empty_inspector(),
+    // );
 
     let child_exit_status = child
         .wait_with_output()
