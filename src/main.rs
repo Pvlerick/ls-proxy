@@ -4,14 +4,17 @@ use std::{
     fmt::Debug,
     io::{self, Read, Write},
     path::Path,
-    process::{exit, Command, Stdio},
+    process::{self, Command, Stdio},
     thread,
 };
 
 use ls_proxy::parser::MessageParser;
 
-use signal_hook::{consts::SIGINT, consts::SIGTERM, iterator::Signals};
-use tracing::{debug, span, trace, Level};
+use signal_hook::{
+    consts::{SIGINT, SIGTERM},
+    iterator::Signals,
+};
+use tracing::{debug, trace};
 use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{RollingFileAppender, Rotation},
@@ -20,7 +23,7 @@ use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let _guard = set_tracing();
-    set_signals_handler()?;
+    set_signals_handler().expect("failed to set signals handlers");
 
     debug!("ls-proxy started");
 
@@ -29,8 +32,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut child = Command::new("podman")
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        // .stdout(Stdio::piped())
+        // .stderr(Stdio::piped())
         .args([
             "run",
             "-i",
@@ -47,19 +50,26 @@ fn main() -> Result<(), Box<dyn Error>> {
         message_parser_inspector(),
     );
 
-    start_copy_thread(
-        child.stdout.take().expect("failed to get child stdout"),
-        io::stdout(),
-        message_parser_inspector(),
-    );
+    // start_copy_thread(
+    //     child.stdout.take().expect("failed to get child stdout"),
+    //     io::stdout(),
+    //     message_parser_inspector(),
+    // );
+    //
+    // start_copy_thread(
+    //     child.stderr.take().expect("failed to get child stderr"),
+    //     io::stderr(),
+    //     empty_inspector(),
+    // );
 
-    start_copy_thread(
-        child.stderr.take().expect("failed to get child stderr"),
-        io::stderr(),
-        empty_inspector(),
-    );
+    let child_exit_status = child
+        .wait()
+        .expect("failed waiting on child process termination");
 
-    child.wait()?;
+    debug!(
+        "child process exit status: {}",
+        child_exit_status.code().unwrap()
+    );
 
     Ok(())
 }
@@ -70,7 +80,7 @@ where
     W: Write + Send + Debug + 'static,
     F: Send + 'static,
 {
-    const BUFFER_SIZE: usize = 4098;
+    const BUFFER_SIZE: usize = 8196;
 
     thread::spawn(move || {
         trace!(
@@ -91,16 +101,11 @@ where
                     String::from_utf8_lossy(&buffer[..bytes_read])
                 );
 
-                inspect_buffer(&buffer);
+                //inspect_buffer(&buffer[..bytes_read]);
 
-                let mut total_bytes_written = 0;
-                while total_bytes_written < bytes_read {
-                    let bytes_written = output
-                        .write(&buffer[total_bytes_written..bytes_read])
-                        .expect("failed to write");
-                    total_bytes_written += bytes_written;
-                    trace!("wrote {} bytes to {:?}", bytes_written, output);
-                }
+                output
+                    .write_all(&buffer[..bytes_read])
+                    .expect("failed to write");
             }
         }
     });
@@ -146,7 +151,7 @@ fn set_tracing() -> WorkerGuard {
 }
 
 fn set_signals_handler() -> Result<(), Box<dyn Error>> {
-    debug!("setting up signals handler");
+    trace!("setting up signals handler");
 
     let mut signals = Signals::new(&[SIGTERM, SIGINT])?;
     let _ = signals.handle();
@@ -154,7 +159,7 @@ fn set_signals_handler() -> Result<(), Box<dyn Error>> {
     thread::spawn(move || {
         for sig in signals.forever() {
             debug!("Received signal '{}', shutting down...", sig);
-            exit(0);
+            process::exit(0);
         }
     });
 
