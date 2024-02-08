@@ -10,7 +10,7 @@ use std::{
 
 use ls_proxy::parser::MessageParser;
 
-use tracing::{debug, info, trace};
+use tracing::{debug, trace, warn};
 use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{RollingFileAppender, Rotation},
@@ -61,12 +61,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         .wait_with_output()
         .expect("failed waiting on child process termination");
 
-    info!("[OUTPUT] {}", String::from_utf8_lossy(&child_output.stdout));
+    let child_exit_code = child_output
+        .status
+        .code()
+        .expect("failed to get child process exit status code");
 
-    debug!(
-        "child process exit status: {}",
-        child_output.status.code().unwrap()
-    );
+    debug!("child process exit status code: {}", child_exit_code);
+
+    if child_exit_code != 0 {
+        warn!(
+            "child process terminated with exit status code {}",
+            child_exit_code
+        );
+        let remaining_stdout = String::from_utf8_lossy(&child_output.stdout);
+        if !remaining_stdout.is_empty() {
+            warn!("child process remaining stdout: {}", remaining_stdout);
+        }
+        let remaining_stderr = String::from_utf8_lossy(&child_output.stderr);
+        if !remaining_stderr.is_empty() {
+            warn!("child process remaining stderr: {}", remaining_stderr);
+        }
+    }
 
     Ok(())
 }
@@ -77,7 +92,7 @@ where
     W: Write + Send + Debug + 'static,
     F: Send + 'static,
 {
-    const BUFFER_SIZE: usize = 8 * 1024;
+    const BUFFER_SIZE: usize = 4 * 1024;
 
     thread::spawn(move || {
         trace!(
@@ -134,7 +149,7 @@ fn set_tracing() -> WorkerGuard {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::builder()
-                .with_default_directive(LevelFilter::TRACE.into())
+                .with_default_directive(LevelFilter::DEBUG.into())
                 .with_env_var("LSPROXY_LOG")
                 .from_env_lossy(),
         )
