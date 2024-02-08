@@ -12,7 +12,6 @@ path = "src/main.rs"
 name = "ls-proxy"
 
 [dependencies]
-signal-hook = "0.3.17"
 tracing = { version = "0.1", features = ["log"] }
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"]}
