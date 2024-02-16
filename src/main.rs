@@ -10,6 +10,7 @@ use std::{
 
 use ls_proxy::parser::MessageParser;
 
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 use tracing_appender::{
     non_blocking::WorkerGuard,
@@ -17,7 +18,8 @@ use tracing_appender::{
 };
 use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let _guard = set_tracing();
 
     debug!("ls-proxy started");
@@ -39,22 +41,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         ])
         .spawn()?;
 
+    let shutdown_token = CancellationToken::new();
+
     start_copy_thread(
         io::stdin(),
         child.stdin.take().expect("failed to get child stdin"),
         message_parser_inspector(),
+        shutdown_token.clone(),
     );
 
     start_copy_thread(
         child.stdout.take().expect("failed to get child stdout"),
         io::stdout(),
         message_parser_inspector(),
+        shutdown_token.clone(),
     );
 
     start_copy_thread(
         child.stderr.take().expect("failed to get child stderr"),
         io::stderr(),
         empty_inspector(),
+        shutdown_token.clone(),
     );
 
     let child_output = child
@@ -86,35 +93,46 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(mut input: R, mut output: W, mut inspect_buffer: F)
-where
+fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(
+    mut input: R,
+    mut output: W,
+    mut inspect_buffer: F,
+    shutdown_token: CancellationToken,
+) where
     R: Read + Send + Debug + 'static,
     W: Write + Send + Debug + 'static,
     F: Send + 'static,
 {
     const BUFFER_SIZE: usize = 4 * 1024;
 
-    thread::spawn(move || {
-        trace!(
-            "starting copy thread from {:?} to {:?} with buffer size {}",
-            input,
-            output,
-            BUFFER_SIZE
-        );
+    trace!(
+        "starting copy thread from {:?} to {:?} with buffer size {}",
+        input,
+        output,
+        BUFFER_SIZE
+    );
 
+    let _ = tokio::spawn(async move {
         let mut buffer = [0u8; BUFFER_SIZE];
 
-        loop {
-            let bytes_read = input.read(&mut buffer).expect("failed to read");
-            let buf = &buffer[..bytes_read];
-            if bytes_read > 0 {
-                trace!("read {} bytes from {:?}", bytes_read, input);
-                trace!("[BUFFER] {}", String::from_utf8_lossy(&buf),);
+        tokio::select! {
+            _ = async {
+                loop {
+                    let bytes_read = input.read(&mut buffer).expect("failed to read");
+                    let buf = &buffer[..bytes_read];
+                    if bytes_read > 0 {
+                        trace!("read {} bytes from {:?}", bytes_read, input);
+                        trace!("[BUFFER] {}", String::from_utf8_lossy(&buf),);
 
-                inspect_buffer(&buf);
+                        inspect_buffer(&buf);
 
-                output.write_all(&buf).expect("failed to write");
-                output.flush().expect("failed to flush output");
+                        output.write_all(&buf).expect("failed to write");
+                        output.flush().expect("failed to flush output");
+                    }
+                }
+            } => {}
+            _ = shutdown_token.cancelled() => {
+                trace!("shutdown requested, stop copying from {:?} to {:?}", input, output);
             }
         }
     });
