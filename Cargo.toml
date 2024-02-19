@@ -17,3 +17,6 @@ tokio-util = "0.7.10"
 tracing = { version = "0.1", features = ["log"] }
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"]}
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }
