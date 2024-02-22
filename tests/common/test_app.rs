@@ -1,5 +1,6 @@
 use std::{
     env::temp_dir,
+    io::Read,
     path::{Path, PathBuf},
 };
 use tokio::fs::create_dir;
@@ -8,6 +9,7 @@ use uuid::Uuid;
 
 pub struct TestApp {
     pub container_id: String,
+    pub stdin: Impl Read,
 }
 
 pub async fn spawn_app(image: &str, code_path: &Path) -> TestApp {

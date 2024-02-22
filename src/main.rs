@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //     }
     // }
     let src_dir = PathBuf::from_str(&args[2])?;
-    let child = startup::run(&args[1], src_dir.as_path(), shutdown_token)?;
+    let child = startup::run_with_std(&args[1], src_dir.as_path(), shutdown_token)?;
 
     let child_output = child
         .wait_with_output()

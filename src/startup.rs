@@ -11,11 +11,19 @@ use crate::parser::MessageParser;
 use tokio_util::sync::CancellationToken;
 use tracing::trace;
 
-pub fn run(
+pub fn run<In, Out, Err>(
     image: &str,
     path: &Path,
+    stdin: In,
+    stdout: Out,
+    stderr: Err,
     shutdown_token: CancellationToken,
-) -> Result<Child, Box<dyn Error>> {
+) -> Result<Child, Box<dyn Error>>
+where
+    In: Read + Send + Debug + 'static,
+    Out: Write + Send + Debug + 'static,
+    Err: Write + Send + Debug + 'static,
+{
     let path = path.to_str().expect("failed to convert &Path to &str");
 
     let mut child = Command::new("podman")
@@ -33,7 +41,7 @@ pub fn run(
         .spawn()?;
 
     start_copy_thread(
-        io::stdin(),
+        stdin,
         child.stdin.take().expect("failed to get child stdin"),
         message_parser_inspector(),
         shutdown_token.clone(),
@@ -41,19 +49,34 @@ pub fn run(
 
     start_copy_thread(
         child.stdout.take().expect("failed to get child stdout"),
-        io::stdout(),
+        stdout,
         message_parser_inspector(),
         shutdown_token.clone(),
     );
 
     start_copy_thread(
         child.stderr.take().expect("failed to get child stderr"),
-        io::stderr(),
+        stderr,
         empty_inspector(),
         shutdown_token.clone(),
     );
 
     Ok(child)
+}
+
+pub fn run_with_std(
+    image: &str,
+    path: &Path,
+    shutdown_token: CancellationToken,
+) -> Result<Child, Box<dyn Error>> {
+    run(
+        image,
+        path,
+        io::stdin(),
+        io::stdout(),
+        io::stderr(),
+        shutdown_token,
+    )
 }
 
 fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(
