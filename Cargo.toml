@@ -12,6 +12,7 @@ path = "src/main.rs"
 name = "ls-proxy"
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 tokio = { version = "1.36.0", features = ["full"] }
 tokio-util = "0.7.10"
 tracing = { version = "0.1", features = ["log"] }

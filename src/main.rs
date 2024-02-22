@@ -5,7 +5,8 @@ use std::{
     str::FromStr,
 };
 
-use ls_proxy::startup;
+use clap::Parser;
+use ls_proxy::entrypoint;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 use tracing_appender::{
@@ -20,8 +21,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     debug!("ls-proxy started");
 
-    let args: Vec<_> = env::args().collect();
-    trace!("args {:?}\n", args);
+    let args = Args::parse();
 
     let shutdown_token = CancellationToken::new();
 
@@ -35,8 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //         Ok(())
     //     }
     // }
-    let src_dir = PathBuf::from_str(&args[2])?;
-    let child = startup::run_with_std(&args[1], src_dir.as_path(), shutdown_token)?;
+    let child = entrypoint::run_with_std(&args.image, args.src_root_dir.as_path(), shutdown_token)?;
 
     let child_output = child
         .wait_with_output()
@@ -90,4 +89,15 @@ fn set_tracing() -> WorkerGuard {
         .init();
 
     guard
+}
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Image
+    #[arg()]
+    image: String,
+    /// Source Root Directory
+    #[arg()]
+    src_root_dir: PathBuf,
 }
