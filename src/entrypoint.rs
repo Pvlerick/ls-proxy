@@ -1,13 +1,11 @@
-use std::{
-    error::Error,
-    fmt::Debug,
-    io::{self, Read, Write},
-    path::Path,
-    process::{Child, Command, Stdio},
-};
+use std::{error::Error, fmt::Debug, path::Path, process::Stdio};
 
 use crate::parser::MessageParser;
 
+use tokio::{
+    io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    process::{Child, Command},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::trace;
 
@@ -20,9 +18,9 @@ pub fn run<In, Out, Err>(
     shutdown_token: CancellationToken,
 ) -> Result<Child, Box<dyn Error>>
 where
-    In: Read + Send + Debug + 'static,
-    Out: Write + Send + Debug + 'static,
-    Err: Write + Send + Debug + 'static,
+    In: AsyncRead + std::marker::Unpin + Send + Debug + 'static,
+    Out: AsyncWrite + std::marker::Unpin + Send + Debug + 'static,
+    Err: AsyncWrite + std::marker::Unpin + Send + Debug + 'static,
 {
     let path = path.to_str().expect("failed to convert &Path to &str");
 
@@ -85,8 +83,8 @@ fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(
     mut inspect_buffer: F,
     shutdown_token: CancellationToken,
 ) where
-    R: Read + Send + Debug + 'static,
-    W: Write + Send + Debug + 'static,
+    R: AsyncRead + std::marker::Unpin + Send + Debug + 'static,
+    W: AsyncWrite + std::marker::Unpin + Send + Debug + 'static,
     F: Send + 'static,
 {
     const BUFFER_SIZE: usize = 4 * 1024;
@@ -104,16 +102,27 @@ fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(
         tokio::select! {
             _ = async {
                 loop {
-                    let bytes_read = input.read(&mut buffer).expect("failed to read");
-                    let buf = &buffer[..bytes_read];
-                    if bytes_read > 0 {
-                        trace!("read {} bytes from {:?}", bytes_read, input);
-                        trace!("[BUFFER] {}", String::from_utf8_lossy(&buf),);
+                    match input.read(&mut buffer).await {
+                        Ok(0) => {},
+                        Ok(bytes_read) => {
+                            let buf = &buffer[..bytes_read];
+                            trace!("read {} bytes from {:?}", bytes_read, input);
+                            trace!("[BUFFER] {}", String::from_utf8_lossy(&buf),);
 
-                        inspect_buffer(&buf);
+                            inspect_buffer(&buf);
 
-                        output.write_all(&buf).expect("failed to write");
-                        output.flush().expect("failed to flush output");
+                            match output.write_all(&buf).await {
+                                Err(e) => panic!("error: {:?}", e),
+                                _ => {},
+                            }
+
+                            match output.flush().await {
+                                Err(e) => panic!("error: {:?}", e),
+                                _ => {},
+                            }
+
+                        },
+                        Err(e) => panic!("error: {:?}", e),
                     }
                 }
             } => {}

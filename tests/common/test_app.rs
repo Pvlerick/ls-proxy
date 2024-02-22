@@ -1,23 +1,48 @@
+use ls_proxy::entrypoint;
 use std::{
     env::temp_dir,
-    io::Read,
+    error::Error,
+    io::{Read, Stdin, Write},
     path::{Path, PathBuf},
+    process::{ChildStdin, ChildStdout},
 };
-use tokio::fs::create_dir;
+use tokio::{fs::create_dir, io::AsyncWrite, process::Child};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub struct TestApp {
     pub container_id: String,
-    pub stdin: Impl Read,
+    child: Child,
 }
 
 pub async fn spawn_app(image: &str, code_path: &Path) -> TestApp {
-    let _proxy = ls_proxy::startup::run(image, code_path, CancellationToken::default())
+    let _proxy = entrypoint::run(image, code_path, CancellationToken::default())
         .expect("Failed to bin address or start server");
 
     TestApp {
         container_id: "".to_string(),
+        child,
+    }
+}
+
+impl AsyncWrite for TestApp {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
     }
 }
 
