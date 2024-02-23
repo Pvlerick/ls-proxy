@@ -8,8 +8,8 @@ use super::{queued_reader::QueuedReader, queued_writer::QueuedWriter};
 pub struct TestApp<'a> {
     child: Child,
     stdin: QueuedReader<'a>,
-    stdout: QueuedWriter<'a>,
-    stderr: QueuedWriter<'a>,
+    stdout: QueuedWriter,
+    stderr: QueuedWriter,
 }
 
 impl<'a> TestApp<'a> {
@@ -19,16 +19,16 @@ impl<'a> TestApp<'a> {
 }
 
 pub(crate) fn spawn_app<'a>(
-    image: &'a str,
-    code_path: &'a Path,
-) -> Result<TestApp<'a>, Box<dyn Error>> {
-    let stdin = QueuedReader::new();
+    image: &str,
+    code_path: &Path,
+) -> Result<TestApp<'a>, Box<dyn Error + 'a>> {
+    let stdin = QueuedReader::<'a>::new();
     let stdout = QueuedWriter::new();
     let stderr = QueuedWriter::new();
 
     let child = entrypoint::run(
-        image,
-        code_path,
+        image.clone(),
+        code_path.clone(),
         stdin.clone(),
         stdout.clone(),
         stderr.clone(),
