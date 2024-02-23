@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::trace;
 
 pub fn run<In, Out, Err>(
-    image: &str,
+    image: String,
     path: &Path,
     stdin: In,
     stdout: Out,
@@ -34,7 +34,7 @@ where
             "--rm",
             "-v",
             format!("{}:{}", path, path).as_str(),
-            image,
+            image.as_str(),
         ])
         .spawn()?;
 
@@ -63,7 +63,7 @@ where
 }
 
 pub fn run_with_std(
-    image: &str,
+    image: String,
     path: &Path,
     shutdown_token: CancellationToken,
 ) -> Result<Child, Box<dyn Error>> {

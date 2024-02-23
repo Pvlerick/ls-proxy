@@ -1,5 +1,5 @@
 use ls_proxy::entrypoint;
-use std::{error::Error, path::Path};
+use std::{error::Error, path::PathBuf};
 use tokio::process::Child;
 use tokio_util::sync::CancellationToken;
 
@@ -19,16 +19,16 @@ impl<'a> TestApp<'a> {
 }
 
 pub(crate) fn spawn_app<'a>(
-    image: &str,
-    code_path: &Path,
-) -> Result<TestApp<'a>, Box<dyn Error + 'a>> {
-    let stdin = QueuedReader::<'a>::new();
+    image: String,
+    code_path: PathBuf,
+) -> Result<TestApp<'static>, Box<dyn Error + 'static>> {
+    let stdin = QueuedReader::<'static>::new();
     let stdout = QueuedWriter::new();
     let stderr = QueuedWriter::new();
 
     let child = entrypoint::run(
-        image.clone(),
-        code_path.clone(),
+        image,
+        code_path.as_path(),
         stdin.clone(),
         stdout.clone(),
         stderr.clone(),

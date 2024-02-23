@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //         Ok(())
     //     }
     // }
-    let child = entrypoint::run_with_std(&args.image, args.src_root_dir.as_path(), shutdown_token)?;
+    let child = entrypoint::run_with_std(args.image, args.src_root_dir.as_path(), shutdown_token)?;
 
     match child.wait_with_output().await {
         Ok(output) => {
