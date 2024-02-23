@@ -1,22 +1,31 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::task::Poll;
 
 use tokio::io::AsyncRead;
 
 #[derive(Debug)]
 pub(crate) struct QueuedReader<'a> {
-    queue: VecDeque<&'a [u8]>,
+    queue: Arc<VecDeque<&'a [u8]>>,
 }
 
 impl<'a> QueuedReader<'a> {
     pub(crate) fn new() -> QueuedReader<'a> {
         QueuedReader {
-            queue: VecDeque::new(),
+            queue: Arc::new(VecDeque::new()),
         }
     }
 
     pub(crate) fn write(&mut self, payload: &'a [u8]) {
         self.queue.push_back(payload);
+    }
+}
+
+impl<'a> Clone for QueuedReader<'a> {
+    fn clone(&self) -> Self {
+        QueuedReader {
+            queue: self.queue.clone(),
+        }
     }
 }
 
