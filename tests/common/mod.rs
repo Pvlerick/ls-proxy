@@ -1,5 +1,3 @@
-mod queued_reader;
-mod queued_writer;
 mod test_app;
 mod utils;
 

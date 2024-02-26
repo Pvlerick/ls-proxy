@@ -1,52 +1,63 @@
 use ls_proxy::entrypoint;
 use std::{error::Error, path::PathBuf};
 use tokio::process::Child;
+use tokio_test::io::{Builder, Handle};
 use tokio_util::sync::CancellationToken;
 
-use super::{queued_reader::QueuedReader, queued_writer::QueuedWriter};
-
-pub struct TestApp<'a> {
+pub struct TestApp {
     _child: Child,
-    stdin: QueuedReader<'a>,
-    stdout: QueuedWriter,
-    stderr: QueuedWriter,
+    stdin: Handle,
+    stdout: Handle,
+    stderr: Handle,
 }
 
-impl<'a> TestApp<'a> {
-    pub(crate) fn write_stdin(&mut self, payload: &'a [u8]) {
+impl TestApp {
+    pub(crate) fn write_stdin(&mut self, payload: &[u8]) {
         self.stdin.write(payload);
     }
 
     pub(crate) fn read_stdout(&mut self) -> Option<Vec<u8>> {
-        self.stdout.read()
+        let mut buf = Vec::new();
+        self.stdout.read(&mut buf);
+        if buf.len() > 0 {
+            return Some(buf);
+        } else {
+            return None;
+        }
     }
 
     pub(crate) fn read_stderr(&mut self) -> Option<Vec<u8>> {
-        self.stderr.read()
+        let mut buf = Vec::new();
+        self.stderr.read(&mut buf);
+        if buf.len() > 0 {
+            return Some(buf);
+        } else {
+            return None;
+        }
     }
 }
 
-pub(crate) fn spawn_app<'a>(
+pub(crate) fn spawn_app(
     image: String,
     code_path: PathBuf,
-) -> Result<TestApp<'static>, Box<dyn Error + 'static>> {
-    let stdin = QueuedReader::<'static>::new();
-    let stdout = QueuedWriter::new();
-    let stderr = QueuedWriter::new();
+) -> Result<TestApp, Box<dyn Error + 'static>> {
+    let (stdin_mock, stdin_handle) = Builder::new().write(b"hello gopls").build_with_handle();
+    let (stdout_mock, stdout_handle) = Builder::new().build_with_handle();
+    let (stderr_mock, stderr_handle) = Builder::new().build_with_handle();
 
     let child = entrypoint::run(
         image,
         code_path.as_path(),
-        stdin.clone(),
-        stdout.clone(),
-        stderr.clone(),
+        stdin_mock,
+        stdout_mock,
+        stderr_mock,
         CancellationToken::default(),
     )?;
 
     Ok(TestApp {
         _child: child,
-        stdin,
-        stdout,
-        stderr,
+        stdin: stdin_handle,
+        stdout: stdout_handle,
+        stderr: stderr_handle,
     })
 }

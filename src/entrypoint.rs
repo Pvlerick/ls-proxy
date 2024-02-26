@@ -103,9 +103,9 @@ fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(
     println!("going to spawn thread");
 
     tokio::spawn(async move {
-        let mut buffer = [0u8; BUFFER_SIZE];
-
         println!("entering main loop");
+
+        let mut buffer = [0u8; BUFFER_SIZE];
 
         loop {
             println!("main loop");

@@ -21,3 +21,4 @@ tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"]}
 
 [dev-dependencies]
 uuid = { version = "1", features = ["v4"] }
+tokio-test = "0.4.3"
