@@ -38,6 +38,8 @@ where
         ])
         .spawn()?;
 
+    println!("run called, about to start copy threads");
+
     start_copy_thread(
         stdin,
         child.stdin.take().expect("failed to get child stdin"),
@@ -58,6 +60,8 @@ where
         empty_inspector(),
         shutdown_token.clone(),
     );
+
+    println!("returning child");
 
     Ok(child)
 }
@@ -81,7 +85,7 @@ fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(
     mut input: R,
     mut output: W,
     mut inspect_buffer: F,
-    shutdown_token: CancellationToken,
+    _shutdown_token: CancellationToken,
 ) where
     R: AsyncRead + std::marker::Unpin + Send + Debug + 'static,
     W: AsyncWrite + std::marker::Unpin + Send + Debug + 'static,
@@ -96,38 +100,36 @@ fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(
         BUFFER_SIZE
     );
 
-    let _ = tokio::spawn(async move {
+    println!("going to spawn thread");
+
+    tokio::spawn(async move {
         let mut buffer = [0u8; BUFFER_SIZE];
 
-        tokio::select! {
-            _ = async {
-                loop {
-                    match input.read(&mut buffer).await {
-                        Ok(0) => {},
-                        Ok(bytes_read) => {
-                            let buf = &buffer[..bytes_read];
-                            trace!("read {} bytes from {:?}", bytes_read, input);
-                            trace!("[BUFFER] {}", String::from_utf8_lossy(&buf),);
+        println!("entering main loop");
 
-                            inspect_buffer(&buf);
+        loop {
+            println!("main loop");
 
-                            match output.write_all(&buf).await {
-                                Err(e) => panic!("error: {:?}", e),
-                                _ => {},
-                            }
+            match input.read(&mut buffer).await {
+                Ok(0) => {}
+                Ok(bytes_read) => {
+                    let buf = &buffer[..bytes_read];
+                    trace!("read {} bytes from {:?}", bytes_read, input);
+                    trace!("[BUFFER] {}", String::from_utf8_lossy(&buf),);
 
-                            match output.flush().await {
-                                Err(e) => panic!("error: {:?}", e),
-                                _ => {},
-                            }
+                    inspect_buffer(&buf);
 
-                        },
+                    match output.write_all(&buf).await {
                         Err(e) => panic!("error: {:?}", e),
+                        _ => {}
+                    }
+
+                    match output.flush().await {
+                        Err(e) => panic!("error: {:?}", e),
+                        _ => {}
                     }
                 }
-            } => {}
-            _ = shutdown_token.cancelled() => {
-                trace!("shutdown requested, stop copying from {:?} to {:?}", input, output);
+                Err(e) => panic!("error: {:?}", e),
             }
         }
     });
@@ -138,7 +140,8 @@ fn message_parser_inspector() -> impl FnMut(&[u8]) {
 
     move |buffer: &[u8]| {
         for msg in mp.parse(buffer) {
-            trace!("[MSG] {}", msg.payload);
+            // trace!("[MSG] {}", msg.payload);
+            println!("[MSG] {}", msg.payload);
         }
     }
 }

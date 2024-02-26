@@ -6,15 +6,23 @@ use tokio_util::sync::CancellationToken;
 use super::{queued_reader::QueuedReader, queued_writer::QueuedWriter};
 
 pub struct TestApp<'a> {
-    child: Child,
+    _child: Child,
     stdin: QueuedReader<'a>,
     stdout: QueuedWriter,
     stderr: QueuedWriter,
 }
 
 impl<'a> TestApp<'a> {
-    pub(crate) fn write_stdin(&mut self, payload: &'a str) {
-        self.stdin.write(payload.as_bytes());
+    pub(crate) fn write_stdin(&mut self, payload: &'a [u8]) {
+        self.stdin.write(payload);
+    }
+
+    pub(crate) fn read_stdout(&mut self) -> Option<Vec<u8>> {
+        self.stdout.read()
+    }
+
+    pub(crate) fn read_stderr(&mut self) -> Option<Vec<u8>> {
+        self.stderr.read()
     }
 }
 
@@ -36,7 +44,7 @@ pub(crate) fn spawn_app<'a>(
     )?;
 
     Ok(TestApp {
-        child,
+        _child: child,
         stdin,
         stdout,
         stderr,

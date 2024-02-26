@@ -17,6 +17,7 @@ impl<'a> QueuedReader<'a> {
     }
 
     pub(crate) fn write(&mut self, payload: &'a [u8]) {
+        println!("write");
         let mut queue = self.queue.lock().unwrap();
         queue.push_back(payload);
     }
@@ -36,9 +37,11 @@ impl<'a> AsyncRead for QueuedReader<'a> {
         _cx: &mut std::task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
+        println!("attepting to read asyn");
         let mut queue = self.queue.lock().unwrap();
         match queue.pop_front() {
             Some(slice) => {
+                println!("async read");
                 buf.put_slice(slice);
                 return Poll::<_>::Ready(Ok(()));
             }
@@ -46,3 +49,5 @@ impl<'a> AsyncRead for QueuedReader<'a> {
         }
     }
 }
+
+impl<'a> Unpin for QueuedReader<'a> {}

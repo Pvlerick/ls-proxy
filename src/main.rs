@@ -24,16 +24,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let shutdown_token = CancellationToken::new();
 
-    // tokio::select! {
-    //     result = startup::run(args[1], args[2], shutdown_token) => {
-    //         result
-    //     }
-    //     termination = unix::signal(SignalKind::terminate()) => {
-    //         debug!("received shutdown signal");
-    //         shutdown_token.cancel();
-    //         Ok(())
-    //     }
-    // }
     let child = entrypoint::run_with_std(args.image, args.src_root_dir.as_path(), shutdown_token)?;
 
     match child.wait_with_output().await {
