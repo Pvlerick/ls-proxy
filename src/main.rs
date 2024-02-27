@@ -24,7 +24,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let shutdown_token = CancellationToken::new();
 
-    let child = entrypoint::run_with_std(args.image, args.src_root_dir.as_path(), shutdown_token)?;
+    let child =
+        entrypoint::run_with_std(args.image, args.src_root_dir.as_path(), shutdown_token).await?;
 
     match child.wait_with_output().await {
         Ok(output) => {

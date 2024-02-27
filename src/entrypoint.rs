@@ -5,11 +5,12 @@ use crate::parser::MessageParser;
 use tokio::{
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     process::{Child, Command},
+    task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::trace;
 
-pub fn run<In, Out, Err>(
+pub async fn run<In, Out, Err>(
     image: String,
     path: &Path,
     stdin: In,
@@ -38,35 +39,31 @@ where
         ])
         .spawn()?;
 
-    println!("run called, about to start copy threads");
-
-    start_copy_thread(
-        stdin,
-        child.stdin.take().expect("failed to get child stdin"),
-        message_parser_inspector(),
-        shutdown_token.clone(),
+    let _ = tokio::join!(
+        start_copy_task(
+            stdin,
+            child.stdin.take().expect("failed to get child stdin"),
+            message_parser_inspector(),
+            shutdown_token.clone(),
+        ),
+        start_copy_task(
+            child.stdout.take().expect("failed to get child stdout"),
+            stdout,
+            message_parser_inspector(),
+            shutdown_token.clone(),
+        ),
+        start_copy_task(
+            child.stderr.take().expect("failed to get child stderr"),
+            stderr,
+            empty_inspector(),
+            shutdown_token.clone(),
+        ),
     );
-
-    start_copy_thread(
-        child.stdout.take().expect("failed to get child stdout"),
-        stdout,
-        message_parser_inspector(),
-        shutdown_token.clone(),
-    );
-
-    start_copy_thread(
-        child.stderr.take().expect("failed to get child stderr"),
-        stderr,
-        empty_inspector(),
-        shutdown_token.clone(),
-    );
-
-    println!("returning child");
 
     Ok(child)
 }
 
-pub fn run_with_std(
+pub async fn run_with_std(
     image: String,
     path: &Path,
     shutdown_token: CancellationToken,
@@ -79,14 +76,16 @@ pub fn run_with_std(
         io::stderr(),
         shutdown_token,
     )
+    .await
 }
 
-fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(
+async fn start_copy_task<'a, R, W, F: FnMut(&[u8])>(
     mut input: R,
     mut output: W,
     mut inspect_buffer: F,
     _shutdown_token: CancellationToken,
-) where
+) -> JoinHandle<()>
+where
     R: AsyncRead + std::marker::Unpin + Send + Debug + 'static,
     W: AsyncWrite + std::marker::Unpin + Send + Debug + 'static,
     F: Send + 'static,
@@ -100,16 +99,10 @@ fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(
         BUFFER_SIZE
     );
 
-    println!("going to spawn thread");
-
     tokio::spawn(async move {
-        println!("entering main loop");
-
         let mut buffer = [0u8; BUFFER_SIZE];
 
         loop {
-            println!("main loop");
-
             match input.read(&mut buffer).await {
                 Ok(0) => {}
                 Ok(bytes_read) => {
@@ -132,7 +125,7 @@ fn start_copy_thread<'a, R, W, F: FnMut(&[u8])>(
                 Err(e) => panic!("error: {:?}", e),
             }
         }
-    });
+    })
 }
 
 fn message_parser_inspector() -> impl FnMut(&[u8]) {
@@ -140,8 +133,7 @@ fn message_parser_inspector() -> impl FnMut(&[u8]) {
 
     move |buffer: &[u8]| {
         for msg in mp.parse(buffer) {
-            // trace!("[MSG] {}", msg.payload);
-            println!("[MSG] {}", msg.payload);
+            trace!("[MSG] {}", msg.payload);
         }
     }
 }
