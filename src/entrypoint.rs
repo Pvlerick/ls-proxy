@@ -3,7 +3,7 @@ use std::{error::Error, fmt::Debug, path::Path, process::Stdio};
 use crate::parser::MessageParser;
 
 use tokio::{
-    io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
     process::{Child, Command},
     task::JoinHandle,
 };
@@ -80,8 +80,8 @@ pub async fn run_with_std(
 }
 
 async fn start_copy_task<'a, R, W, F: FnMut(&[u8])>(
-    mut input: R,
-    mut output: W,
+    input: R,
+    output: W,
     mut inspect_buffer: F,
     _shutdown_token: CancellationToken,
 ) -> JoinHandle<()>
@@ -90,7 +90,7 @@ where
     W: AsyncWrite + std::marker::Unpin + Send + Debug + 'static,
     F: Send + 'static,
 {
-    const BUFFER_SIZE: usize = 4 * 1024;
+    const BUFFER_SIZE: usize = 8 * 1024;
 
     trace!(
         "starting copy thread from {:?} to {:?} with buffer size {}",
@@ -102,25 +102,34 @@ where
     tokio::spawn(async move {
         let mut buffer = [0u8; BUFFER_SIZE];
 
+        let mut reader = BufReader::new(input);
+        let mut writer = BufWriter::new(output);
+
         loop {
-            match input.read(&mut buffer).await {
+            match reader.read(&mut buffer).await {
                 Ok(0) => {}
                 Ok(bytes_read) => {
-                    let buf = &buffer[..bytes_read];
-                    trace!("read {} bytes from {:?}", bytes_read, input);
-                    trace!("[BUFFER] {}", String::from_utf8_lossy(&buf),);
+                    let mut read_slice = &buffer[..bytes_read];
+                    trace!("read {} bytes from {:?}", bytes_read, reader);
+                    trace!("[BUFFER] {}", String::from_utf8_lossy(&read_slice),);
 
-                    inspect_buffer(&buf);
+                    inspect_buffer(&read_slice);
 
-                    match output.write_all(&buf).await {
-                        Err(e) => panic!("error: {:?}", e),
+                    trace!("inspection done, writing to output...");
+
+                    match writer.write_all_buf(&mut read_slice).await {
+                        Err(e) => panic!("failed to write to {:?}: {:?}", writer, e),
                         _ => {}
                     }
 
-                    match output.flush().await {
-                        Err(e) => panic!("error: {:?}", e),
+                    trace!("flushing...");
+
+                    match writer.flush().await {
+                        Err(e) => panic!("failed to flush {:?}: {:?}", writer, e),
                         _ => {}
                     }
+
+                    trace!("done copying");
                 }
                 Err(e) => panic!("error: {:?}", e),
             }

@@ -1,22 +1,15 @@
-use std::{
-    env,
-    error::Error,
-    path::{Path, PathBuf},
-};
+use std::{error::Error, path::PathBuf};
 
 use clap::Parser;
 use ls_proxy::entrypoint;
+use ls_proxy::telemetry::{get_subscriber, init_subscriber};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
-use tracing_appender::{
-    non_blocking::WorkerGuard,
-    rolling::{RollingFileAppender, Rotation},
-};
-use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let _guard = set_tracing();
+    let subscriber = get_subscriber();
+    init_subscriber(subscriber);
 
     debug!("ls-proxy started");
 
@@ -55,31 +48,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
-}
-
-fn set_tracing() -> WorkerGuard {
-    let file_appender = RollingFileAppender::builder()
-        .rotation(Rotation::NEVER)
-        .filename_prefix("log")
-        .build(
-            &Path::new(&env::var("HOME").expect("no HOME env variable found"))
-                .join(".local/state/ls-proxy"),
-        )
-        .expect("failed to initialize file appender");
-
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::DEBUG.into())
-                .with_env_var("LSPROXY_LOG")
-                .from_env_lossy(),
-        )
-        .with_writer(non_blocking)
-        .init();
-
-    guard
 }
 
 #[derive(Parser, Debug)]

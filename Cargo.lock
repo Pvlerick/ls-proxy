@@ -294,6 +294,7 @@ name = "ls-proxy"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "once_cell",
  "tokio",
  "tokio-test",
  "tokio-util",
