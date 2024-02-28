@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 pub async fn create_tmp_dir() -> PathBuf {
     let mut dir_path = env::temp_dir();
-    dir_path.push(Uuid::new_v4().to_string());
+    dir_path.push(format!("ls-proxy-{}", Uuid::new_v4().to_string()));
 
     fs::create_dir(&dir_path)
         .await
