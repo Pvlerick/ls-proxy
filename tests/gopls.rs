@@ -65,7 +65,7 @@ func main() {
         .build();
 
     let main_dir_path_clone = main_dir_path.clone();
-    let _talk = entrypoint::run(
+    let tasks = entrypoint::run(
         "quay.io/pvlerick/gopls:0.14.2-r0".to_string(),
         main_dir_path_clone,
         stdin,
@@ -75,6 +75,17 @@ func main() {
     )
     .await;
 
+    match tasks {
+        Ok(mut set) => {
+            while let Some(i) = set.join_next().await {
+                match i {
+                    Ok(()) => {}
+                    _ => panic!("bang"),
+                }
+            }
+        }
+        _ => panic!("boom"),
+    }
     std::thread::sleep(std::time::Duration::from_secs(3));
 
     fs::remove_dir_all(main_dir_path).await?;

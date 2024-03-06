@@ -5,7 +5,7 @@ use crate::parser::MessageParser;
 use tokio::{
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     process::Command,
-    task::JoinHandle,
+    task::{JoinHandle, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::trace;
@@ -17,7 +17,7 @@ pub async fn run<In, Out, Err>(
     stdout: Out,
     stderr: Err,
     shutdown_token: CancellationToken,
-) -> Result<(), Box<dyn Error + Send + Sync>>
+) -> Result<JoinSet<()>, Box<dyn Error + Send + Sync>>
 where
     In: AsyncRead + std::marker::Unpin + Send + Debug + 'static,
     Out: AsyncWrite + std::marker::Unpin + Send + Debug + 'static,
@@ -39,35 +39,34 @@ where
         ])
         .spawn()?;
 
-    tokio::select!(
-        _ = start_copy_task(
-            stdin,
-            child.stdin.take().expect("failed to get child stdin"),
-            message_parser_inspector(),
-            shutdown_token.clone()) => {}
-        _ = start_copy_task(
-            child.stdout.take().expect("failed to get child stdout"),
-            stdout,
-            message_parser_inspector(),
-            shutdown_token.clone()) => {}
-        _ = start_copy_task(
-            child.stderr.take().expect("failed to get child stderr"),
-            stderr,
-            empty_inspector(),
-            shutdown_token.clone()) => {}
-        _ = shutdown_token.cancelled() => {}
-    );
+    let mut tasks = JoinSet::new();
 
-    std::thread::sleep(std::time::Duration::from_secs(3));
+    tasks.spawn(async move {
+        tokio::select! {
+            _ = start_copy_loop(
+                stdin,
+                child.stdin.take().expect("failed to get child stdin"),
+                message_parser_inspector()) => {}
+            _ = start_copy_loop(
+                child.stdout.take().expect("failed to get child stdout"),
+                stdout,
+                message_parser_inspector()) => {}
+            _ = start_copy_loop(
+                child.stderr.take().expect("failed to get child stderr"),
+                stderr,
+                empty_inspector()) => {}
+            _ = shutdown_token.cancelled() => {}
+        }
+    });
 
-    Ok(())
+    Ok(tasks)
 }
 
 pub async fn run_with_std(
     image: String,
     path: PathBuf,
     shutdown_token: CancellationToken,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<JoinSet<()>, Box<dyn Error + Send + Sync>> {
     run(
         image,
         path,
@@ -80,58 +79,48 @@ pub async fn run_with_std(
 }
 
 #[allow(unreachable_code)]
-async fn start_copy_task<'a, R, W, F: FnMut(&[u8])>(
+async fn start_copy_loop<'a, R, W, F: FnMut(&[u8])>(
     mut input: R,
     mut output: W,
     mut inspect_buffer: F,
-    shutdown_token: CancellationToken,
-) -> Result<JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>, Box<dyn Error + Send + Sync>>
+) -> Result<(), io::Error>
 where
     R: AsyncRead + std::marker::Unpin + Send + Debug + 'static,
     W: AsyncWrite + std::marker::Unpin + Send + Debug + 'static,
     F: Send + 'static,
 {
     const BUFFER_SIZE: usize = 8 * 1024;
+    let mut buffer = [0u8; BUFFER_SIZE];
 
     trace!(
-        "starting copy task from {:?} to {:?} with buffer size {}",
+        "starting copy loop from {:?} to {:?} with buffer size {}",
         input,
         output,
         BUFFER_SIZE
     );
 
-    Ok(tokio::spawn(async move {
-        tokio::select! {
-            _ = async {
-                let mut buffer = [0u8; BUFFER_SIZE];
+    loop {
+        let bytes_read = input.read(&mut buffer).await?;
+        if bytes_read > 0 {
+            let mut read_slice = &buffer[..bytes_read];
+            trace!("read {} bytes from {:?}", bytes_read, input);
+            trace!("[BUFFER] {}", String::from_utf8_lossy(&read_slice));
 
-                loop {
-                    let bytes_read = input.read(&mut buffer).await?;
-                    if bytes_read > 0 {
-                        let mut read_slice = &buffer[..bytes_read];
-                        trace!("read {} bytes from {:?}", bytes_read, input);
-                        trace!("[BUFFER] {}", String::from_utf8_lossy(&read_slice));
+            inspect_buffer(&read_slice);
 
-                        inspect_buffer(&read_slice);
+            trace!("inspection done, writing to output...");
 
-                        trace!("inspection done, writing to output...");
+            output.write_all(&mut read_slice).await?;
 
-                        output.write_all(&mut read_slice).await?;
+            trace!("flushing...");
 
-                        trace!("flushing...");
+            output.flush().await?;
 
-                        output.flush().await?;
-
-                        trace!("done copying");
-                    }
-
-                }
-                Ok::<_, io::Error>(())
-            } => {}
-            _ = shutdown_token.cancelled() => {}
+            trace!("done copying");
         }
-        Ok(())
-    }))
+    }
+
+    // Ok::<_, io::Error>(())
 }
 
 fn message_parser_inspector() -> impl FnMut(&[u8]) {
